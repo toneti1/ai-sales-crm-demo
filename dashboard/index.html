@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Sales Assistant CRM</title>
+  <style>
+    :root {
+      --ink: #17202a;
+      --muted: #5f6c7b;
+      --paper: #f7f8fb;
+      --surface: #ffffff;
+      --line: #dfe5ec;
+      --accent: #0f766e;
+      --accent-dark: #115e59;
+      --warn: #b45309;
+      --danger: #dc2626;
+      --success: #15803d;
+      --radius: 8px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      color: var(--ink);
+      background: var(--paper);
+      line-height: 1.5;
+    }
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--line);
+      padding: 18px 24px;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    header h1 { margin: 0; font-size: 20px; }
+    header p { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
+    .wrap { max-width: 1400px; margin: 0 auto; padding: 24px; }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: end;
+      margin-bottom: 16px;
+    }
+    .toolbar label {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 13px;
+      color: var(--muted);
+      min-width: 140px;
+      flex: 1 1 160px;
+    }
+    .toolbar input, .toolbar select {
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      font-size: 14px;
+      background: var(--surface);
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid var(--line);
+      background: var(--surface);
+    }
+    .badge.active { background: var(--accent); color: white; border-color: var(--accent); }
+    .badge .count { font-weight: 700; }
+    table { width: 100%; border-collapse: collapse; background: var(--surface); border-radius: var(--radius); overflow: hidden; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+    th, td { padding: 12px 14px; text-align: left; border-bottom: 1px solid var(--line); font-size: 14px; }
+    th { background: var(--paper); color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; }
+    tr:hover td { background: #f0f4f8; cursor: pointer; }
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #e2e8f0;
+      font-size: 12px;
+      margin-right: 4px;
+    }
+    .priority-high { color: var(--danger); font-weight: 700; }
+    .priority-medium { color: var(--warn); font-weight: 700; }
+    .priority-low { color: var(--muted); }
+    .status-new { color: var(--muted); }
+    .status-contacted, .status-replied { color: var(--accent); font-weight: 600; }
+    .status-follow-up-sent { color: var(--warn); font-weight: 600; }
+    .status-declined { color: var(--danger); }
+    .status-won { color: var(--success); font-weight: 600; }
+    .due-badge { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #fee2e2; color: var(--danger); font-size: 12px; font-weight: 600; }
+    .modal-overlay {
+      position: fixed; inset: 0; background: rgba(23,32,42,0.45);
+      display: none; align-items: center; justify-content: center;
+      z-index: 20; padding: 24px;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: var(--surface); border-radius: 12px; width: 100%; max-width: 760px;
+      max-height: 90vh; overflow: auto; box-shadow: 0 20px 50px rgba(0,0,0,0.18);
+    }
+    .modal header {
+      position: relative; display: flex; justify-content: space-between; align-items: start;
+      border-bottom: 1px solid var(--line); border-radius: 12px 12px 0 0;
+    }
+    .modal header h2 { margin: 0; font-size: 22px; }
+    .modal header button {
+      background: none; border: none; font-size: 24px; cursor: pointer; color: var(--muted); line-height: 1;
+    }
+    .modal .body { padding: 24px; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .section { margin-bottom: 24px; }
+    .section h3 { margin: 0 0 10px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); }
+    .form-row { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+    .form-row label { font-size: 13px; color: var(--muted); }
+    .form-row input, .form-row select, .form-row textarea {
+      padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); font-size: 14px; font-family: inherit;
+    }
+    .form-row textarea { min-height: 80px; resize: vertical; }
+    .email-box {
+      background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px;
+      white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px;
+    }
+    .btn {
+      appearance: none; border: 1px solid var(--accent); background: var(--accent); color: white;
+      padding: 10px 16px; border-radius: var(--radius); font-weight: 600; cursor: pointer; font-size: 14px;
+    }
+    .btn.secondary { background: transparent; color: var(--accent-dark); border-color: var(--line); }
+    .btn.danger { background: var(--danger); border-color: var(--danger); }
+    .btn.sm { padding: 6px 10px; font-size: 12px; min-height: 32px; }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+    .row-actions { display: flex; gap: 8px; }
+    .empty { text-align: center; color: var(--muted); padding: 48px; }
+    @media (max-width: 720px) {
+      .grid-2 { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>AI Sales Assistant CRM</h1>
+    <p id="subtitle">Loading leads...</p>
+  </header>
+
+  <div class="wrap">
+    <div class="toolbar">
+      <label>
+        Search
+        <input type="text" id="search" placeholder="Company, industry, location...">
+      </label>
+      <label>
+        Status
+        <select id="filter-status"><option value="">All</option></select>
+      </label>
+      <label>
+        Priority
+        <select id="filter-priority"><option value="">All</option></select>
+      </label>
+      <label>
+        Industry
+        <select id="filter-industry"><option value="">All</option></select>
+      </label>
+      <label>
+        Sort by
+        <select id="sort-by">
+          <option value="created-desc">Date added (newest)</option>
+          <option value="created-asc">Date added (oldest)</option>
+          <option value="priority-desc">Priority (high → low)</option>
+          <option value="priority-asc">Priority (low → high)</option>
+        </select>
+      </label>
+      <span class="badge" id="due-filter">
+        Follow-ups due <span class="count" id="due-count">0</span>
+      </span>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Company</th>
+          <th>Industry</th>
+          <th>Location</th>
+          <th>Priority</th>
+          <th>Status</th>
+          <th>Score</th>
+          <th>Email</th>
+          <th>Follow-up</th>
+          <th>Added</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="leads-body"><tr><td colspan="10" class="empty">Loading...</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="modal-overlay" id="modal">
+    <div class="modal">
+      <header>
+        <div>
+          <h2 id="modal-title">Company</h2>
+          <p id="modal-subtitle"></p>
+        </div>
+        <button id="modal-close">&times;</button>
+      </header>
+      <div class="body">
+        <div class="grid-2">
+          <div class="section">
+            <h3>Company info</h3>
+            <div id="modal-info"></div>
+          </div>
+          <div class="section">
+            <h3>Audit summary</h3>
+            <div id="modal-audit"></div>
+          </div>
+        </div>
+
+        <div class="section">
+          <h3>Cold email</h3>
+          <div class="email-box" id="modal-email"></div>
+          <div class="actions">
+            <button class="btn" id="copy-email">Copy email</button>
+            <a class="btn secondary" id="view-page" target="_blank" rel="noopener">Open landing page</a>
+          </div>
+        </div>
+
+        <div class="section" id="followup-section" style="display: none;">
+          <h3>Follow-up email</h3>
+          <div class="email-box" id="modal-followup"></div>
+          <div class="actions">
+            <button class="btn" id="copy-followup">Copy follow-up</button>
+          </div>
+        </div>
+
+        <div class="section">
+          <h3>Edit lead</h3>
+          <div class="grid-2">
+            <div class="form-row">
+              <label for="edit-status">Status</label>
+              <select id="edit-status">
+                <option value="new">new</option>
+                <option value="contacted">contacted</option>
+                <option value="follow-up-sent">follow-up-sent</option>
+                <option value="replied">replied</option>
+                <option value="declined">declined</option>
+                <option value="won">won</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label for="edit-priority">Priority</label>
+              <select id="edit-priority">
+                <option value="low">low</option>
+                <option value="medium">medium</option>
+                <option value="high">high</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label for="edit-sent">Email sent at</label>
+              <input type="datetime-local" id="edit-sent">
+            </div>
+            <div class="form-row">
+              <label for="edit-tags">Tags (comma separated)</label>
+              <input type="text" id="edit-tags" placeholder="e.g. hot, spanish">
+            </div>
+            <div class="form-row" style="grid-column: 1 / -1;">
+              <label for="edit-notes">Notes</label>
+              <textarea id="edit-notes"></textarea>
+            </div>
+          </div>
+          <div class="actions">
+            <button class="btn" id="save-lead">Save changes</button>
+            <span id="save-status" style="color: var(--muted); font-size: 14px; align-self: center;"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const TOKEN_KEY = 'dashboard-token';
+    (function captureTokenFromUrl() {
+      const params = new URLSearchParams(window.location.search);
+      const token = params.get('token');
+      if (!token) return;
+      localStorage.setItem(TOKEN_KEY, token);
+      params.delete('token');
+      const query = params.toString();
+      window.history.replaceState(null, '', window.location.pathname + (query ? '?' + query : '') + window.location.hash);
+    })();
+
+    function getToken() {
+      return localStorage.getItem(TOKEN_KEY);
+    }
+
+    function withToken(url) {
+      const token = getToken();
+      if (!token) return url;
+      return url + (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token);
+    }
+
+    async function authFetch(input, init = {}) {
+      const headers = new Headers(init.headers || {});
+      const token = getToken();
+      if (token) headers.set('X-Dashboard-Token', token);
+      let res = await fetch(input, { ...init, headers });
+      if (res.status === 401) {
+        const entered = window.prompt('Access token required:');
+        if (entered) {
+          localStorage.setItem(TOKEN_KEY, entered.trim());
+          headers.set('X-Dashboard-Token', entered.trim());
+          res = await fetch(input, { ...init, headers });
+        }
+      }
+      return res;
+    }
+
+    const leadsBody = document.getElementById('leads-body');
+    const subtitle = document.getElementById('subtitle');
+    const searchInput = document.getElementById('search');
+    const statusSelect = document.getElementById('filter-status');
+    const prioritySelect = document.getElementById('filter-priority');
+    const industrySelect = document.getElementById('filter-industry');
+    const sortSelect = document.getElementById('sort-by');
+    const dueFilter = document.getElementById('due-filter');
+    const dueCount = document.getElementById('due-count');
+    const modal = document.getElementById('modal');
+    const modalTitle = document.getElementById('modal-title');
+    const modalSubtitle = document.getElementById('modal-subtitle');
+    const modalInfo = document.getElementById('modal-info');
+    const modalAudit = document.getElementById('modal-audit');
+    const modalEmail = document.getElementById('modal-email');
+    const modalFollowup = document.getElementById('modal-followup');
+    const followupSection = document.getElementById('followup-section');
+    const viewPage = document.getElementById('view-page');
+    const editStatus = document.getElementById('edit-status');
+    const editPriority = document.getElementById('edit-priority');
+    const editSent = document.getElementById('edit-sent');
+    const editTags = document.getElementById('edit-tags');
+    const editNotes = document.getElementById('edit-notes');
+    const saveLeadBtn = document.getElementById('save-lead');
+    const saveStatus = document.getElementById('save-status');
+    const copyEmailBtn = document.getElementById('copy-email');
+    const copyFollowupBtn = document.getElementById('copy-followup');
+
+    let allLeads = [];
+    let activePlaceId = null;
+    let dueOnly = false;
+    let currentSort = 'created-desc';
+
+    function toIsoLocal(isoString) {
+      if (!isoString) return '';
+      const d = new Date(isoString);
+      if (isNaN(d.getTime())) return '';
+      const pad = n => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+
+    function fromIsoLocal(localString) {
+      if (!localString) return null;
+      return new Date(localString).toISOString();
+    }
+
+    function isFollowUpDue(lead) {
+      if (!lead.emailSentAt) return false;
+      if (!lead.followUpDueAt) return false;
+      const due = new Date(lead.followUpDueAt);
+      const today = new Date();
+      today.setHours(0,0,0,0);
+      return due <= today;
+    }
+
+    function statusClass(status) {
+      return 'status-' + (status || 'new').replace(/[^a-z]/g, '-');
+    }
+
+    function priorityClass(priority) {
+      return 'priority-' + (priority || 'medium');
+    }
+
+    function unique(values) {
+      return [...new Set(values.filter(Boolean))].sort();
+    }
+
+    function renderOptions(select, values) {
+      const current = select.value;
+      select.innerHTML = '<option value="">All</option>';
+      for (const v of values) {
+        const opt = document.createElement('option');
+        opt.value = v; opt.textContent = v;
+        select.appendChild(opt);
+      }
+      select.value = current;
+    }
+
+    const PRIORITY_RANK = { high: 3, medium: 2, low: 1 };
+
+    function sortLeads(leads) {
+      return [...leads].sort((a, b) => {
+        const leadA = a.lead || {};
+        const leadB = b.lead || {};
+        switch (currentSort) {
+          case 'priority-desc':
+            return (PRIORITY_RANK[leadB.priority] || 0) - (PRIORITY_RANK[leadA.priority] || 0);
+          case 'priority-asc':
+            return (PRIORITY_RANK[leadA.priority] || 0) - (PRIORITY_RANK[leadB.priority] || 0);
+          case 'created-asc':
+            return new Date(leadA.createdAt || 0) - new Date(leadB.createdAt || 0);
+          case 'created-desc':
+          default:
+            return new Date(leadB.createdAt || 0) - new Date(leadA.createdAt || 0);
+        }
+      });
+    }
+
+    function formatDate(isoString) {
+      if (!isoString) return '-';
+      const d = new Date(isoString);
+      if (isNaN(d.getTime())) return '-';
+      return d.toLocaleDateString();
+    }
+
+    function renderLeads() {
+      const q = searchInput.value.toLowerCase();
+      const status = statusSelect.value;
+      const priority = prioritySelect.value;
+      const industry = industrySelect.value;
+
+      const filtered = sortLeads(allLeads).filter(item => {
+        const lead = item.lead || {};
+        const matchSearch = !q ||
+          (lead.companyName || '').toLowerCase().includes(q) ||
+          (lead.industry || '').toLowerCase().includes(q) ||
+          (lead.location || '').toLowerCase().includes(q) ||
+          (lead.email || '').toLowerCase().includes(q);
+        const matchStatus = !status || lead.status === status;
+        const matchPriority = !priority || lead.priority === priority;
+        const matchIndustry = !industry || lead.industry === industry;
+        const matchDue = !dueOnly || isFollowUpDue(lead);
+        return matchSearch && matchStatus && matchPriority && matchIndustry && matchDue;
+      });
+
+      leadsBody.innerHTML = '';
+      if (filtered.length === 0) {
+        leadsBody.innerHTML = '<tr><td colspan="10" class="empty">No leads match.</td></tr>';
+        return;
+      }
+
+      for (const item of filtered) {
+        const lead = item.lead || {};
+        const tr = document.createElement('tr');
+        const due = isFollowUpDue(lead);
+        const placeId = lead.placeId || '';
+        tr.innerHTML = `
+          <td><strong>${escapeHtml(lead.companyName || 'Unknown')}</strong></td>
+          <td>${escapeHtml(lead.industry || '')}</td>
+          <td>${escapeHtml(lead.location || '')}</td>
+          <td class="${priorityClass(lead.priority)}">${escapeHtml(lead.priority || 'medium')}</td>
+          <td class="${statusClass(lead.status)}">${escapeHtml(lead.status || 'new')}</td>
+          <td>${lead.websiteScore ?? '-'}</td>
+          <td>${escapeHtml(lead.email || '-')}</td>
+          <td>${due ? '<span class="due-badge">Due</span>' : (lead.followUpDueAt ? new Date(lead.followUpDueAt).toLocaleDateString() : '-')}</td>
+          <td>${formatDate(lead.createdAt)}</td>
+          <td>
+            <div class="row-actions">
+              <button class="btn secondary sm" data-action="open" data-place-id="${escapeHtml(placeId)}">Open</button>
+              <button class="btn danger sm" data-action="delete" data-place-id="${escapeHtml(placeId)}">Delete</button>
+            </div>
+          </td>
+        `;
+        tr.querySelector('[data-action="open"]').addEventListener('click', e => {
+          e.stopPropagation();
+          openModal(item);
+        });
+        tr.querySelector('[data-action="delete"]').addEventListener('click', e => {
+          e.stopPropagation();
+          deleteLead(placeId, lead.companyName || 'this lead');
+        });
+        leadsBody.appendChild(tr);
+      }
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function openModal(item) {
+      activePlaceId = item.lead.placeId;
+      modalTitle.textContent = item.lead.companyName || 'Unknown';
+      modalSubtitle.textContent = `${item.lead.industry || ''} in ${item.lead.location || ''}`;
+      modalInfo.innerHTML = `
+        <p><strong>Website:</strong> ${item.lead.website ? `<a href="${escapeHtml(item.lead.website)}" target="_blank" rel="noopener">${escapeHtml(item.lead.website)}</a>` : '-'}</p>
+        <p><strong>Email:</strong> ${item.lead.email ? `<a href="mailto:${escapeHtml(item.lead.email)}">${escapeHtml(item.lead.email)}</a>` : '-'}</p>
+        <p><strong>Size:</strong> ${escapeHtml(item.lead.companySize || 'Unknown')}</p>
+        <p><strong>Segment:</strong> ${escapeHtml(item.lead.segment || '-')}</p>
+        <p><strong>Website score:</strong> ${item.lead.websiteScore ?? '-'}</p>
+      `;
+      const audit = item.audit || {};
+      const painPoints = audit.observed_pain_points || audit.painPoints || [];
+      modalAudit.innerHTML = `
+        <p>${escapeHtml(audit.summary || 'No audit summary.')}</p>
+        ${painPoints.length ? `<ul>${painPoints.map(p => `<li>${escapeHtml(typeof p === 'string' ? p : p.issue || JSON.stringify(p))}</li>`).join('')}</ul>` : ''}
+      `;
+      const email = item.coldEmail || {};
+      modalEmail.textContent = `Subject: ${email.subject || ''}\n\n${email.body || ''}`;
+
+      const followUp = item.followUpEmail || {};
+      if (followUp.subject || followUp.body) {
+        modalFollowup.textContent = `Subject: ${followUp.subject || ''}\n\n${followUp.body || ''}`;
+        followupSection.style.display = 'block';
+      } else {
+        followupSection.style.display = 'none';
+      }
+
+      viewPage.href = item.savedHtmlPath ? withToken(`/pages/${item.savedHtmlPath.replace(/^generated_landing_pages\//, '')}`) : '#';
+      viewPage.style.display = item.savedHtmlPath ? 'inline-flex' : 'none';
+
+      editStatus.value = item.lead.status || 'new';
+      editPriority.value = item.lead.priority || 'medium';
+      editSent.value = toIsoLocal(item.lead.emailSentAt);
+      editTags.value = (item.lead.tags || []).join(', ');
+      editNotes.value = item.lead.notes || '';
+      saveStatus.textContent = '';
+      modal.classList.add('open');
+    }
+
+    function closeModal() {
+      modal.classList.remove('open');
+      activePlaceId = null;
+    }
+
+    async function saveLead() {
+      if (!activePlaceId) return;
+      saveStatus.textContent = 'Saving...';
+      const tags = editTags.value.split(',').map(t => t.trim()).filter(Boolean);
+      const payload = {
+        status: editStatus.value,
+        priority: editPriority.value,
+        notes: editNotes.value,
+        tags: tags,
+        emailSentAt: fromIsoLocal(editSent.value),
+      };
+      try {
+        const res = await authFetch(`/api/leads/${encodeURIComponent(activePlaceId)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Save failed');
+        const item = allLeads.find(l => l.lead.placeId === activePlaceId);
+        if (item) item.lead = data.lead;
+        renderLeads();
+        saveStatus.textContent = 'Saved.';
+      } catch (err) {
+        saveStatus.textContent = 'Error: ' + err.message;
+      }
+    }
+
+    async function deleteLead(placeId, name) {
+      if (!confirm(`Delete ${name}? This cannot be undone.`)) return;
+      try {
+        const res = await authFetch(`/api/leads/${encodeURIComponent(placeId)}`, {
+          method: 'DELETE',
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Delete failed');
+        allLeads = allLeads.filter(l => l.lead.placeId !== placeId);
+        if (activePlaceId === placeId) closeModal();
+        renderLeads();
+      } catch (err) {
+        alert('Error deleting lead: ' + err.message);
+      }
+    }
+
+    async function loadLeads() {
+      try {
+        const res = await authFetch('/api/leads');
+        const data = await res.json();
+        allLeads = data.leads || [];
+        subtitle.textContent = `${allLeads.length} leads loaded`;
+
+        const statuses = unique(allLeads.map(l => l.lead.status));
+        const priorities = unique(allLeads.map(l => l.lead.priority));
+        const industries = unique(allLeads.map(l => l.lead.industry));
+        renderOptions(statusSelect, statuses);
+        renderOptions(prioritySelect, priorities);
+        renderOptions(industrySelect, industries);
+
+        const due = allLeads.filter(l => isFollowUpDue(l.lead)).length;
+        dueCount.textContent = due;
+
+        renderLeads();
+      } catch (err) {
+        subtitle.textContent = 'Failed to load leads: ' + err.message;
+      }
+    }
+
+    document.getElementById('modal-close').addEventListener('click', closeModal);
+    modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
+    saveLeadBtn.addEventListener('click', saveLead);
+    copyEmailBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText(modalEmail.textContent).then(() => {
+        copyEmailBtn.textContent = 'Copied!';
+        setTimeout(() => copyEmailBtn.textContent = 'Copy email', 1200);
+      });
+    });
+    copyFollowupBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText(modalFollowup.textContent).then(() => {
+        copyFollowupBtn.textContent = 'Copied!';
+        setTimeout(() => copyFollowupBtn.textContent = 'Copy follow-up', 1200);
+      });
+    });
+    [searchInput, statusSelect, prioritySelect, industrySelect].forEach(el => {
+      el.addEventListener('input', renderLeads);
+    });
+    sortSelect.addEventListener('change', () => {
+      currentSort = sortSelect.value;
+      renderLeads();
+    });
+    dueFilter.addEventListener('click', () => {
+      dueOnly = !dueOnly;
+      dueFilter.classList.toggle('active', dueOnly);
+      renderLeads();
+    });
+
+    loadLeads();
+  </script>
+</body>
+</html>
