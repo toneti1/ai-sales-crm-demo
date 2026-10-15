@@ -1,4 +1,2 @@
-2026.10.15.1
-Initial GitHub-sync release: dashboard (token auth, threading, CF-Connecting-IP),
-rule-based pipeline (no API keys), landing-page button in the React modal,
-Stop.vbs support, UTF-8 subprocess fixes.
+﻿2026.10.15.1104
+Published: 2026-10-15 11:04
