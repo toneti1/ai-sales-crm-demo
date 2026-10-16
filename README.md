@@ -10,6 +10,7 @@ What is in here:
 - `generator/` — rule-based audit / cold email / landing page engine
 - `lead-finder/dist/` — built scraper CLI (Puppeteer stealth)
 - `integrate.py`, `run_pipeline.py` — pipeline glue (portable node/chrome aware)
+- `launch.ps1`, `sync.ps1`, `stop.ps1`, `Start.vbs`, `Stop.vbs` — portable launcher scripts and auto-updater
 
 What is NOT here (by design):
 - Lead data (`unified_leads.json`, `generated_landing_pages/`) — stays local per PC

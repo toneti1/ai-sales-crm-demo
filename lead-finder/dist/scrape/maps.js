@@ -244,7 +244,7 @@ export async function launchBrowser() {
     return puppeteerExtra.launch({
         headless: true,
         protocolTimeout: 120000,
-        args: ['--lang=es-ES', '--no-sandbox', '--disable-blink-features=AutomationControlled'],
+        args: ['--lang=es-ES', '--disable-blink-features=AutomationControlled'],
         defaultViewport: { width: 1366, height: 900 },
     });
 }

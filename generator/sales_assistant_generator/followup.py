@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List
@@ -130,7 +131,19 @@ def process_follow_ups(
             skipped += 1
 
     if not dry_run:
-        output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        fd, tmp_path = tempfile.mkstemp(
+            dir=str(output_path.parent), suffix=".tmp", prefix=".leads-"
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, str(output_path))
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
     return {"generated": generated, "skipped": skipped, "delayDays": delay_days}
 

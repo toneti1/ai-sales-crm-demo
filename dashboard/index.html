@@ -225,7 +225,7 @@
           <div class="email-box" id="modal-email"></div>
           <div class="actions">
             <button class="btn" id="copy-email">Copy email</button>
-            <a class="btn secondary" id="view-page" target="_blank" rel="noopener">Open landing page</a>
+            <a class="btn secondary" id="view-page" target="_blank" rel="noopener noreferrer">Open landing page</a>
           </div>
         </div>
 
@@ -493,9 +493,13 @@
     function openModal(item) {
       activePlaceId = item.lead.placeId;
       modalTitle.textContent = item.lead.companyName || 'Unknown';
-      modalSubtitle.textContent = `${item.lead.industry || ''} in ${item.lead.location || ''}`;
+      const webUrl = (item.lead.website || '').trim();
+      const isHttpWeb = /^https?:\/\//i.test(webUrl);
+      const webDisplay = isHttpWeb
+        ? `<a href="${escapeHtml(webUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(webUrl)}</a>`
+        : (webUrl ? escapeHtml(webUrl) : '-');
       modalInfo.innerHTML = `
-        <p><strong>Website:</strong> ${item.lead.website ? `<a href="${escapeHtml(item.lead.website)}" target="_blank" rel="noopener">${escapeHtml(item.lead.website)}</a>` : '-'}</p>
+        <p><strong>Website:</strong> ${webDisplay}</p>
         <p><strong>Email:</strong> ${item.lead.email ? `<a href="mailto:${escapeHtml(item.lead.email)}">${escapeHtml(item.lead.email)}</a>` : '-'}</p>
         <p><strong>Size:</strong> ${escapeHtml(item.lead.companySize || 'Unknown')}</p>
         <p><strong>Segment:</strong> ${escapeHtml(item.lead.segment || '-')}</p>

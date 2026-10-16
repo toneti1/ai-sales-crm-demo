@@ -27,21 +27,24 @@ GENERATED_PAGES_DIR = ROOT_DIR / "generated_landing_pages"
 FRONTEND_DIST = ROOT_DIR / "frontend" / "dist"
 
 UNIFIED_LEADS_FILE = Path(os.environ.get("LEADS_DB", ROOT_DIR / "unified_leads.json"))
-STAGING_LEADS_FILE = ROOT_DIR / "lead-finder" / "leads.json"
+STAGING_LEADS_FILE = Path(os.environ.get("STAGING_LEADS_DB", ROOT_DIR / "lead-finder" / "leads.json"))
 
 ALLOWED_CRM_FIELDS = {"status", "priority", "notes", "tags", "emailSentAt"}
 STATUS_VALUES = {"new", "contacted", "follow-up-sent", "replied", "declined", "won"}
+PRIORITY_VALUES = {"low", "medium", "high"}
 
 MAX_BODY_BYTES = 64 * 1024
 MAX_TAGS = 20
 MAX_TAG_LEN = 30
 MAX_NOTES_LEN = 2000
+MAX_PLACE_ID_LEN = 200
 RATE_LIMIT_PER_MINUTE = 60
 
 _local_hosts = {"127.0.0.1", "localhost", "::1"}
 ALLOW_REMOTE = os.environ.get("DASHBOARD_ALLOW_REMOTE") == "1"
 _rate_windows: Dict[str, List[float]] = {}
 _rate_lock = threading.Lock()
+_db_lock = threading.Lock()
 
 # Optional shared-token auth. When DASHBOARD_TOKEN is set, every request must
 # carry it in the X-Dashboard-Token header, a ?token= query param, or the
@@ -73,15 +76,15 @@ def _load_leads() -> Dict[str, Any]:
     return json.loads(UNIFIED_LEADS_FILE.read_text(encoding="utf-8"))
 
 
-def _save_leads(payload: Dict[str, Any]) -> None:
-    """Persist the unified leads database atomically (tmp file + rename)."""
+def _atomic_write_json(target_file: Path, payload: Dict[str, Any]) -> None:
+    """Persist a JSON file atomically (tmp file + rename)."""
     fd, tmp_path = tempfile.mkstemp(
-        dir=str(UNIFIED_LEADS_FILE.parent), suffix=".tmp", prefix=".leads-"
+        dir=str(target_file.parent), suffix=".tmp", prefix=".leads-"
     )
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, ensure_ascii=False, indent=2)
-        os.replace(tmp_path, str(UNIFIED_LEADS_FILE))
+        os.replace(tmp_path, str(target_file))
     except Exception:
         try:
             os.unlink(tmp_path)
@@ -90,10 +93,19 @@ def _save_leads(payload: Dict[str, Any]) -> None:
         raise
 
 
+def _save_leads(payload: Dict[str, Any]) -> None:
+    """Persist the unified leads database atomically (tmp file + rename)."""
+    _atomic_write_json(UNIFIED_LEADS_FILE, payload)
+
+
 def _rate_limited(client_ip: str) -> bool:
     """Return True when the client exceeded the per-minute request budget."""
     now = time.monotonic()
     with _rate_lock:
+        if len(_rate_windows) > 1000:
+            stale = [ip for ip, win in _rate_windows.items() if not win or now - win[-1] >= 60]
+            for ip in stale:
+                _rate_windows.pop(ip, None)
         window = [t for t in _rate_windows.get(client_ip, []) if now - t < 60]
         if len(window) >= RATE_LIMIT_PER_MINUTE:
             _rate_windows[client_ip] = window
@@ -108,7 +120,10 @@ def _auth_throttled(client_ip: str) -> bool:
     now = time.monotonic()
     with _rate_lock:
         window = [t for t in _auth_failures.get(client_ip, []) if now - t < 60]
-        _auth_failures[client_ip] = window
+        if window:
+            _auth_failures[client_ip] = window
+        else:
+            _auth_failures.pop(client_ip, None)
         return len(window) >= AUTH_MAX_FAILURES_PER_MINUTE
 
 
@@ -116,6 +131,10 @@ def _record_auth_failure(client_ip: str) -> None:
     """Register a failed auth attempt for throttling."""
     now = time.monotonic()
     with _rate_lock:
+        if len(_auth_failures) > 1000:
+            stale = [ip for ip, win in _auth_failures.items() if not win or now - win[-1] >= 60]
+            for ip in stale:
+                _auth_failures.pop(ip, None)
         window = [t for t in _auth_failures.get(client_ip, []) if now - t < 60]
         window.append(now)
         _auth_failures[client_ip] = window
@@ -174,10 +193,14 @@ def _run_pipeline_worker(city: str, sector: str, max_results: int) -> None:
         str(max_results),
         "--skip-build",
     ]
+    clean_env = os.environ.copy()
+    clean_env.pop("DASHBOARD_TOKEN", None)
+    clean_env.pop("DASHBOARD_ALLOW_REMOTE", None)
     try:
         proc = subprocess.run(
             cmd,
             cwd=str(ROOT_DIR),
+            env=clean_env,
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -246,9 +269,7 @@ def _remove_from_staging(place_id: str) -> None:
         kept = [lead for lead in leads if lead.get("placeId") != place_id]
         if len(kept) != len(leads):
             payload["leads"] = kept
-            STAGING_LEADS_FILE.write_text(
-                json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
+            _atomic_write_json(STAGING_LEADS_FILE, payload)
     except Exception:
         pass
 
@@ -258,18 +279,14 @@ def _clear_staging() -> None:
     if not STAGING_LEADS_FILE.exists():
         return
     try:
-        STAGING_LEADS_FILE.write_text(
-            json.dumps(
-                {
-                    "schemaVersion": 1,
-                    "generatedAt": datetime.now(timezone.utc).isoformat(),
-                    "query": {},
-                    "leads": [],
-                },
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
+        _atomic_write_json(
+            STAGING_LEADS_FILE,
+            {
+                "schemaVersion": 1,
+                "generatedAt": datetime.now(timezone.utc).isoformat(),
+                "query": {},
+                "leads": [],
+            },
         )
     except Exception:
         pass
@@ -293,6 +310,8 @@ def _build_indexed_leads(payload: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
 class DashboardHandler(BaseHTTPRequestHandler):
     """HTTP request handler for dashboard API and static files."""
 
+    timeout = 10
+
     def version_string(self) -> str:
         """Avoid leaking server and Python version details."""
         return "BaseHTTP/0.6"
@@ -300,11 +319,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def _origin_allowed(self) -> bool:
         """Block cross-origin mutations (CSRF / DNS-rebinding).
 
-        Allows same-origin (no header) and requests from local hosts only,
-        unless DASHBOARD_ALLOW_REMOTE=1 (public tunnel demo mode).
+        Allows same-origin (no header) and requests from local hosts or the matching
+        remote tunnel host when DASHBOARD_ALLOW_REMOTE=1.
         """
-        if ALLOW_REMOTE:
-            return True
         origin = self.headers.get("Origin") or self.headers.get("Referer")
         if not origin:
             return True
@@ -312,7 +329,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
             parsed = urlparse(origin)
         except ValueError:
             return False
-        return parsed.hostname in _local_hosts
+        if parsed.hostname in _local_hosts:
+            return True
+        if ALLOW_REMOTE:
+            host_header = self.headers.get("Host", "").strip().lower()
+            return bool(host_header and parsed.netloc.lower() == host_header)
+        return False
 
     def _client_ip(self) -> str:
         """Real client IP: prefer CF-Connecting-IP when behind the tunnel."""
@@ -326,11 +348,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def _check_auth(self) -> int:
         """Return 0 when authorized, else the error status (401/429) to send.
 
-        The token is validated first so a valid token never hits the failure
-        throttle (which counts only bad/missing tokens, per real client IP).
+        Check throttle first so a locked-out IP cannot brute-force validate tokens.
         """
         if not DASHBOARD_TOKEN:
             return 0
+        client_ip = self._client_ip()
+        if _auth_throttled(client_ip):
+            return 429
         provided = self.headers.get("X-Dashboard-Token")
         from_query = False
         if provided is None:
@@ -347,21 +371,29 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if from_query:
                 self._set_auth_cookie = True
             return 0
-        client_ip = self._client_ip()
-        if _auth_throttled(client_ip):
-            return 429
         _record_auth_failure(client_ip)
         return 401
 
     def _send_auth_cookie_if_needed(self) -> None:
         """Plant the auth cookie right after a successful ?token= login."""
         if getattr(self, "_set_auth_cookie", False):
+            is_secure = (
+                self.headers.get("X-Forwarded-Proto", "").strip().lower() == "https"
+                or bool(self.headers.get("CF-Connecting-IP"))
+            )
+            secure_flag = "; Secure" if is_secure else ""
             self.send_header(
                 "Set-Cookie",
                 f"{AUTH_COOKIE}={DASHBOARD_TOKEN}; Path=/; "
-                f"Max-Age={AUTH_COOKIE_MAX_AGE}; SameSite=Strict; HttpOnly",
+                f"Max-Age={AUTH_COOKIE_MAX_AGE}; SameSite=Strict; HttpOnly{secure_flag}",
             )
             self._set_auth_cookie = False
+
+    def _send_security_headers(self) -> None:
+        """Emit defensive HTTP response headers."""
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
 
     def log_message(self, fmt: str, *args: Any) -> None:
         """Silence default request logging to keep output clean."""
@@ -372,6 +404,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        self._send_security_headers()
         self._send_auth_cookie_if_needed()
         self.end_headers()
         self.wfile.write(body)
@@ -379,7 +412,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def _send_error(self, message: str, status: int = 400) -> None:
         self._send_json({"error": message}, status)
 
-    def _send_file(self, file_path: Path, content_type: str) -> None:
+    def _send_file(
+        self,
+        file_path: Path,
+        content_type: str,
+        extra_headers: Optional[Dict[str, str]] = None,
+    ) -> None:
         if not file_path.exists():
             self._send_error("Not found", 404)
             return
@@ -387,12 +425,24 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
+        self._send_security_headers()
         self._send_auth_cookie_if_needed()
+        if extra_headers:
+            for header_name, header_val in extra_headers.items():
+                self.send_header(header_name, header_val)
         self.end_headers()
         self.wfile.write(data)
 
+    def _parse_content_length(self) -> int:
+        raw = self.headers.get("Content-Length", "0")
+        try:
+            val = int(raw)
+            return val if val >= 0 else -1
+        except (TypeError, ValueError):
+            return -1
+
     def _read_body(self) -> bytes:
-        length = int(self.headers.get("Content-Length", "0"))
+        length = self._parse_content_length()
         return self.rfile.read(length) if length > 0 else b""
 
     @staticmethod
@@ -455,6 +505,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
         email_match = re.match(r"^/api/leads/([^/]+)/email$", path)
         if email_match:
             place_id = unquote(email_match.group(1))
+            if len(place_id) > MAX_PLACE_ID_LEN:
+                self._send_error("Invalid placeId", 400)
+                return
             payload = _load_leads()
             item = _build_indexed_leads(payload).get(place_id)
             if not item:
@@ -477,8 +530,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
             # Resolve and guard against directory traversal.
             try:
                 file_path = file_path.resolve()
-                if str(file_path).startswith(str(GENERATED_PAGES_DIR.resolve())):
-                    self._send_file(file_path, "text/html; charset=utf-8")
+                if file_path.is_relative_to(GENERATED_PAGES_DIR.resolve()):
+                    csp = (
+                        "default-src 'none'; style-src 'unsafe-inline'; "
+                        "img-src 'self' data:; base-uri 'none'; form-action 'none'"
+                    )
+                    self._send_file(
+                        file_path,
+                        "text/html; charset=utf-8",
+                        extra_headers={"Content-Security-Policy": csp},
+                    )
                     return
             except Exception:
                 pass
@@ -490,7 +551,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             relative = path.lstrip("/").replace("/", os.sep)
             candidate = (FRONTEND_DIST / relative).resolve()
             try:
-                if str(candidate).startswith(str(FRONTEND_DIST.resolve())):
+                if candidate.is_relative_to(FRONTEND_DIST.resolve()):
                     if candidate.is_file():
                         self._send_file(candidate, self._content_type(candidate))
                         return
@@ -525,7 +586,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if "application/json" not in content_type.lower():
                 self._send_error("Content-Type must be application/json", 415)
                 return
-            length = int(self.headers.get("Content-Length", "0"))
+            length = self._parse_content_length()
+            if length < 0:
+                self._send_error("Invalid Content-Length", 400)
+                return
             if length > MAX_BODY_BYTES:
                 self._send_error("Request body too large", 413)
                 return
@@ -570,12 +634,18 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._send_error("Content-Type must be application/json", 415)
             return
 
-        length = int(self.headers.get("Content-Length", "0"))
+        length = self._parse_content_length()
+        if length < 0:
+            self._send_error("Invalid Content-Length", 400)
+            return
         if length > MAX_BODY_BYTES:
             self._send_error("Request body too large", 413)
             return
 
         place_id = unquote(match.group(1))
+        if len(place_id) > MAX_PLACE_ID_LEN:
+            self._send_error("Invalid placeId", 400)
+            return
         body = self._read_body()
         try:
             updates = json.loads(body.decode("utf-8")) if body else {}
@@ -598,6 +668,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
             )
             return
 
+        if "priority" in updates and updates["priority"] not in PRIORITY_VALUES:
+            self._send_error(
+                f"Invalid priority. Allowed: {', '.join(sorted(PRIORITY_VALUES))}", 400
+            )
+            return
+
         if "tags" in updates:
             if not isinstance(updates["tags"], list):
                 self._send_error("tags must be a list", 400)
@@ -614,26 +690,40 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 )
                 return
 
-        if "notes" in updates and isinstance(updates["notes"], str):
-            if len(updates["notes"]) > MAX_NOTES_LEN:
+        if "notes" in updates:
+            if updates["notes"] is not None and not isinstance(updates["notes"], str):
+                self._send_error("notes must be a string", 400)
+                return
+            if isinstance(updates["notes"], str) and len(updates["notes"]) > MAX_NOTES_LEN:
                 self._send_error(f"notes limited to {MAX_NOTES_LEN} characters", 400)
                 return
 
-        payload = _load_leads()
-        indexed = _build_indexed_leads(payload)
-        item = indexed.get(place_id)
-        if not item:
-            self._send_error("Lead not found", 404)
-            return
+        if "emailSentAt" in updates and updates["emailSentAt"] is not None:
+            if not isinstance(updates["emailSentAt"], str) or len(updates["emailSentAt"]) > 40:
+                self._send_error("emailSentAt must be a valid ISO-8601 string", 400)
+                return
+            try:
+                datetime.fromisoformat(updates["emailSentAt"].replace("Z", "+00:00"))
+            except ValueError:
+                self._send_error("emailSentAt must be a valid ISO-8601 string", 400)
+                return
 
-        lead_record = item.setdefault("lead", {})
-        for key, value in updates.items():
-            if value is None:
-                lead_record[key] = None
-            else:
-                lead_record[key] = value
+        with _db_lock:
+            payload = _load_leads()
+            indexed = _build_indexed_leads(payload)
+            item = indexed.get(place_id)
+            if not item:
+                self._send_error("Lead not found", 404)
+                return
 
-        _save_leads(payload)
+            lead_record = item.setdefault("lead", {})
+            for key, value in updates.items():
+                if value is None:
+                    lead_record[key] = None
+                else:
+                    lead_record[key] = value
+
+            _save_leads(payload)
         self._send_json({"ok": True, "placeId": place_id, "lead": lead_record})
 
     def do_DELETE(self) -> None:  # noqa: N802
@@ -654,12 +744,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if not self._origin_allowed():
                 self._send_error("Origin not allowed", 403)
                 return
-            payload = _load_leads()
-            deleted = len(payload.get("leads", []))
-            payload["leads"] = []
-            payload["totalLeads"] = 0
-            _save_leads(payload)
-            _clear_staging()
+            with _db_lock:
+                payload = _load_leads()
+                deleted = len(payload.get("leads", []))
+                payload["leads"] = []
+                payload["totalLeads"] = 0
+                _save_leads(payload)
+                _clear_staging()
             self._send_json({"ok": True, "deleted": deleted})
             return
 
@@ -677,18 +768,22 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
 
         place_id = unquote(match.group(1))
-        payload = _load_leads()
-        leads = payload.get("leads", [])
-        new_leads = [item for item in leads if item.get("lead", {}).get("placeId") != place_id]
-
-        if len(new_leads) == len(leads):
-            self._send_error("Lead not found", 404)
+        if len(place_id) > MAX_PLACE_ID_LEN:
+            self._send_error("Invalid placeId", 400)
             return
+        with _db_lock:
+            payload = _load_leads()
+            leads = payload.get("leads", [])
+            new_leads = [item for item in leads if item.get("lead", {}).get("placeId") != place_id]
 
-        payload["leads"] = new_leads
-        payload["totalLeads"] = len(new_leads)
-        _save_leads(payload)
-        _remove_from_staging(place_id)
+            if len(new_leads) == len(leads):
+                self._send_error("Lead not found", 404)
+                return
+
+            payload["leads"] = new_leads
+            payload["totalLeads"] = len(new_leads)
+            _save_leads(payload)
+            _remove_from_staging(place_id)
         self._send_json({"ok": True, "deleted": True, "placeId": place_id})
 
 

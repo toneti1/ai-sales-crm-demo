@@ -7,8 +7,10 @@ and accumulates results in unified_leads.json (no overwriting).
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
@@ -22,10 +24,11 @@ from sales_assistant_generator.generator import generate_personalized_package
 
 
 def _clean_name(name: str | None) -> str:
-    """Strip branch/location suffixes such as 'Moonz | Orthodontic Practice London'."""
+    """Strip branch/location suffixes and formula-injection prefix characters."""
     if not name:
         return "Unknown Business"
-    return name.split("|")[0].strip()
+    cleaned = name.split("|")[0].strip().lstrip("=+-@\t\r").strip()
+    return cleaned or "Unknown Business"
 
 
 def _clean_email(email: str | None) -> str | None:
@@ -238,7 +241,9 @@ def process_leads_file(
         package["lead"].update(default_crm)
 
         if save_html_dir:
-            slug = package["websiteDraft"]["page_slug"]
+            raw_slug = package["websiteDraft"]["page_slug"]
+            pid_suffix = re.sub(r"[^a-zA-Z0-9]", "", str(place_id or ""))[-8:]
+            slug = f"{raw_slug}-{pid_suffix}" if pid_suffix else raw_slug
             html_file = save_html_dir / f"{slug}.html"
             html_file.write_text(package["generatedWebsiteHtml"], encoding="utf-8")
             package["savedHtmlPath"] = str(html_file.relative_to(output_path.parent))
@@ -260,7 +265,19 @@ def process_leads_file(
         "leads": processed_leads,
     }
 
-    output_path.write_text(json.dumps(result_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    fd, tmp_path = tempfile.mkstemp(
+        dir=str(output_path.parent), suffix=".tmp", prefix=".leads-"
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(result_payload, handle, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, str(output_path))
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
     return result_payload
 
 

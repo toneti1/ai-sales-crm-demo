@@ -1,6 +1,62 @@
 import { analyzeSeo } from '../lib/seo.js';
 import { extractEmails } from '../lib/email.js';
 import { withTimeout } from '../lib/timeout.js';
+import { lookup } from 'node:dns/promises';
+import { BlockList, isIP } from 'node:net';
+
+const _blockList = new BlockList();
+_blockList.addSubnet('0.0.0.0', 8, 'ipv4');
+_blockList.addSubnet('10.0.0.0', 8, 'ipv4');
+_blockList.addSubnet('100.64.0.0', 10, 'ipv4');
+_blockList.addSubnet('127.0.0.0', 8, 'ipv4');
+_blockList.addSubnet('169.254.0.0', 16, 'ipv4');
+_blockList.addSubnet('172.16.0.0', 12, 'ipv4');
+_blockList.addSubnet('192.0.0.0', 24, 'ipv4');
+_blockList.addSubnet('192.0.2.0', 24, 'ipv4');
+_blockList.addSubnet('192.168.0.0', 16, 'ipv4');
+_blockList.addSubnet('198.18.0.0', 15, 'ipv4');
+_blockList.addSubnet('198.51.100.0', 24, 'ipv4');
+_blockList.addSubnet('203.0.113.0', 24, 'ipv4');
+_blockList.addSubnet('224.0.0.0', 4, 'ipv4');
+_blockList.addSubnet('240.0.0.0', 4, 'ipv4');
+_blockList.addSubnet('::', 128, 'ipv6');
+_blockList.addSubnet('::1', 128, 'ipv6');
+_blockList.addSubnet('::ffff:0:0', 96, 'ipv6');
+_blockList.addSubnet('64:ff9b::', 96, 'ipv6');
+_blockList.addSubnet('100::', 64, 'ipv6');
+_blockList.addSubnet('2001:db8::', 32, 'ipv6');
+_blockList.addSubnet('fc00::', 7, 'ipv6');
+_blockList.addSubnet('fe80::', 10, 'ipv6');
+_blockList.addSubnet('ff00::', 8, 'ipv6');
+
+function isBlockedIp(rawAddr) {
+    const clean = (rawAddr || '').replace(/^\[|\]$/g, '').split('%')[0].toLowerCase();
+    const ver = isIP(clean);
+    if (ver === 4) return _blockList.check(clean, 'ipv4');
+    if (ver === 6) return _blockList.check(clean, 'ipv6');
+    return true;
+}
+
+async function isSafePublicUrl(targetUrl) {
+    try {
+        const u = new URL(targetUrl);
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+        const hostname = u.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+        if (!hostname || hostname === 'localhost' || hostname.endsWith('.local') || hostname.endsWith('.internal')) return false;
+        if (isIP(hostname) !== 0) {
+            return !isBlockedIp(hostname);
+        }
+        const addresses = await lookup(hostname, { all: true }).catch(() => []);
+        if (!addresses || addresses.length === 0) return false;
+        for (const entry of addresses) {
+            if (isBlockedIp(entry.address)) return false;
+        }
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 const PARKED_REGEX = /domain.{0,30}(for sale|se vende)|sedoparking|parkingcrew|hugedomains|buy this domain|este dominio.{0,20}venta|dan\.com|afternic|location\.href.*lander|\/lander["']/i;
 const SOCIAL_HOSTS = /^(www\.)?(facebook\.com|instagram\.com|linktr\.ee|wa\.me|api\.whatsapp\.com)/i;
 function emptyFacts(siteDown) {
@@ -32,16 +88,39 @@ function emptyFacts(siteDown) {
         languages: [],
     };
 }
+async function safeFetch(initialUrl, init, maxRedirects = 5) {
+    let currentUrl = initialUrl;
+    let hops = 0;
+    while (hops <= maxRedirects) {
+        if (!await isSafePublicUrl(currentUrl)) {
+            throw new Error(`SSRF blocked: ${currentUrl}`);
+        }
+        const res = await fetch(currentUrl, {
+            ...init,
+            redirect: 'manual',
+        });
+        if (res.status >= 300 && res.status < 400) {
+            const loc = res.headers.get('location');
+            if (!loc) {
+                return { res, finalUrl: currentUrl };
+            }
+            currentUrl = new URL(loc, currentUrl).toString();
+            hops++;
+            continue;
+        }
+        return { res, finalUrl: currentUrl };
+    }
+    throw new Error('Too many redirects');
+}
 async function headExists(url, timeoutMs) {
     try {
-        const res = await fetch(url, {
+        const { res } = await safeFetch(url, {
             method: 'GET',
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             },
             signal: AbortSignal.timeout(Math.min(timeoutMs, 6000)),
-            redirect: 'follow',
         });
         return res.status !== 404 && res.status < 500;
     }
@@ -51,17 +130,20 @@ async function headExists(url, timeoutMs) {
 }
 async function fetchHtml(url, timeoutMs) {
     try {
-        const res = await fetch(url, {
+        const { res, finalUrl } = await safeFetch(url, {
             signal: AbortSignal.timeout(Math.min(timeoutMs, 8000)),
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             },
-            redirect: 'follow',
         });
         if (!res.ok)
-            return { url, html: '' };
-        return { url: res.url || url, html: await res.text() };
+            return { url: finalUrl, html: '' };
+        const contentLength = Number(res.headers.get('content-length'));
+        if (contentLength > 5000000)
+            return { url: finalUrl, html: '' };
+        const text = await res.text();
+        return { url: finalUrl, html: text.slice(0, 2000000) };
     }
     catch {
         return { url, html: '' };
@@ -110,7 +192,27 @@ async function sitemapExistsViaPage(page, url, timeoutMs) {
 }
 export async function crawlSite(browser, rawUrl, config) {
     const url = rawUrl.startsWith('http') ? rawUrl : `https://${rawUrl}`;
+    if (!await isSafePublicUrl(url)) {
+        return { status: 'down', finalUrl: null, facts: emptyFacts(true), seoFails: [], emails: [], text: '' };
+    }
     const page = await browser.newPage();
+    await page.setRequestInterception(true);
+    page.on('request', async (req) => {
+        try {
+            const reqUrl = req.url();
+            if (reqUrl.startsWith('data:') || reqUrl.startsWith('blob:')) {
+                req.continue();
+                return;
+            }
+            if (await isSafePublicUrl(reqUrl)) {
+                req.continue();
+            } else {
+                req.abort();
+            }
+        } catch {
+            req.abort();
+        }
+    });
     let jsErrors = 0;
     try {
         page.on('pageerror', () => jsErrors++);
@@ -145,6 +247,9 @@ export async function crawlSite(browser, rawUrl, config) {
             : page.url() && page.url() !== 'about:blank'
                 ? page.url()
                 : url;
+        if (!await isSafePublicUrl(finalUrl)) {
+            return { status: 'down', finalUrl: null, facts: emptyFacts(true), seoFails: [], emails: [], text: '' };
+        }
         const loadTimeMs = Date.now() - started;
         const finalHost = new URL(finalUrl).hostname;
         if (SOCIAL_HOSTS.test(finalHost)) {
@@ -359,8 +464,9 @@ export async function crawlSite(browser, rawUrl, config) {
         const pricesVisible = priceMatches.length > 3;
         const urlObj = new URL(finalUrl);
         const origin = urlObj.origin;
-        const hostParts = urlObj.hostname.split('.');
-        const rootHost = hostParts.length >= 2 ? hostParts.slice(-2).join('.') : urlObj.hostname;
+        const cleanHost = urlObj.hostname.replace(/^\[|\]$/g, '');
+        const hostParts = cleanHost.split('.');
+        const rootHost = (!isIP(cleanHost) && hostParts.length > 2) ? hostParts.slice(-2).join('.') : urlObj.hostname;
         const rootOrigin = `${urlObj.protocol}//${rootHost}`;
         const [robotsOrigin, robotsRoot] = await Promise.all([
             fetchText(`${origin}/robots.txt`, config.timeoutMs),

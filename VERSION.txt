@@ -1,2 +1,3 @@
-﻿2026.10.15.1104
-Published: 2026-10-15 11:04
+2026.10.17.0100
+Published: 2026-10-17 01:00
+Security audit hardening: dynamic tokens, SSRF blocklist, slowloris timeouts, atomic writes, host validation, CSP, and rate limits.

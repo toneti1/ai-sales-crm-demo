@@ -21,6 +21,10 @@ _rate_lock = threading.Lock()
 def _rate_limited(client_ip: str) -> bool:
     now = time.monotonic()
     with _rate_lock:
+        if len(_rate_windows) > 1000:
+            stale = [ip for ip, win in _rate_windows.items() if not win or now - win[-1] >= 60]
+            for ip in stale:
+                _rate_windows.pop(ip, None)
         window = [t for t in _rate_windows.get(client_ip, []) if now - t < 60]
         if len(window) >= RATE_LIMIT_PER_MINUTE:
             _rate_windows[client_ip] = window
@@ -32,6 +36,7 @@ def _rate_limited(client_ip: str) -> bool:
 
 class GenerateHandler(BaseHTTPRequestHandler):
     server_version = "BaseHTTP/0.6"
+    timeout = 10
 
     def version_string(self) -> str:
         """Avoid leaking server and Python version details."""
@@ -42,6 +47,9 @@ class GenerateHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
         self.end_headers()
         self.wfile.write(body)
 
@@ -65,7 +73,15 @@ class GenerateHandler(BaseHTTPRequestHandler):
             self._send_json(415, {"error": "Content-Type must be application/json"})
             return
 
-        length = int(self.headers.get("Content-Length", "0"))
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            if length < 0:
+                self._send_json(400, {"error": "Invalid Content-Length"})
+                return
+        except ValueError:
+            self._send_json(400, {"error": "Invalid Content-Length"})
+            return
+
         if length > MAX_BODY_BYTES:
             self._send_json(413, {"error": "Request body too large"})
             return
@@ -80,8 +96,8 @@ class GenerateHandler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             self._send_json(400, {"error": "Invalid JSON body"})
             return
-        except Exception as exc:  # noqa: BLE001 - log detail, expose generic error
-            print(f"POST /generate failed: {exc!r}", file=sys.stderr)
+        except Exception as exc:  # noqa: BLE001 - log type only, expose generic error
+            print(f"POST /generate failed: {exc.__class__.__name__}", file=sys.stderr)
             self._send_json(400, {"error": "Invalid request"})
             return
 
