@@ -58,18 +58,18 @@ if ($url) {
     Set-Clipboard $share
     Start-Process $share
     [System.Windows.Forms.MessageBox]::Show(
-        "Comparte esta URL con tu equipo (ya esta copiada en tu portapapeles):`r`n`r`n" +
+        "Share this URL with your team (already copied to your clipboard):`r`n`r`n" +
         "$share`r`n`r`n" +
-        "Si no abre a la primera, espera 30-60 segundos y recarga (el DNS puede tardar).`r`n" +
-        "Tambien esta guardada en url.txt.`r`n`r`n" +
-        "No cierres esta ventana no existe: el servidor y el tunnel siguen en segundo plano.`r`n" +
-        "Para apagar: reinicia el PC o cierra 'cloudflared.exe' y 'python.exe' en el Administrador de tareas.",
+        "If it doesn't open immediately, wait 30-60 seconds and refresh (DNS may take a moment).`r`n" +
+        "It is also saved in url.txt.`r`n`r`n" +
+        "The server and tunnel continue running in the background.`r`n" +
+        "To stop: run Stop.vbs or close 'cloudflared.exe' and 'python.exe' in Task Manager.",
         'CRM demo', 0, 64
     )
 } else {
     [System.Windows.Forms.MessageBox]::Show(
-        "No se pudo crear el tunnel publico (sin internet o el firewall bloquea cloudflared.exe).`r`n`r`n" +
-        "Revisa la conexion / firewall y vuelve a hacer doble clic en Start.vbs.",
+        "Could not create public tunnel (no internet connection or firewall is blocking cloudflared.exe).`r`n`r`n" +
+        "Check your connection/firewall and double-click Start.vbs again.",
         'CRM demo', 0, 48
     )
 }
