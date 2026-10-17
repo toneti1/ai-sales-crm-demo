@@ -36,17 +36,17 @@ Start-Process -WindowStyle Hidden -FilePath "$dir\cloudflared.exe" `
     -WorkingDirectory $dir `
     -RedirectStandardOutput "$dir\tunnel.log" -RedirectStandardError "$dir\tunnel.err.log"
 
-# 4. Esperar a que el tunnel publique su URL (hasta 120 s).
+# 4. Esperar a que el tunnel publique su URL y registre la conexion (hasta 120 s).
 $url = $null
 $deadline = (Get-Date).AddSeconds(120)
 while (-not $url -and (Get-Date) -lt $deadline) {
-    Start-Sleep -Seconds 3
+    Start-Sleep -Seconds 2
     $text = ''
     try { $text = (Get-Content "$dir\tunnel.log" -Raw -ErrorAction Stop) } catch {}
     if (-not $text) { try { $text = (Get-Content "$dir\tunnel.err.log" -Raw -ErrorAction Stop) } catch {} }
     if ($text) {
         $m = [regex]::Match([string]$text, 'https://[a-z0-9-]+\.trycloudflare\.com')
-        if ($m.Success) { $url = $m.Value }
+        if ($m.Success -and $text -match 'Registered tunnel connection') { $url = $m.Value }
     }
 }
 
@@ -56,6 +56,14 @@ if ($url) {
     $share = "$url/?token=$token"
     Set-Content -Path 'url.txt' -Value $share -Encoding UTF8
     Set-Clipboard $share
+    $dnsDeadline = (Get-Date).AddSeconds(30)
+    while ((Get-Date) -lt $dnsDeadline) {
+        try {
+            $resp = Invoke-WebRequest -Uri $share -UseBasicParsing -TimeoutSec 4 -ErrorAction Stop
+            if ($resp.StatusCode -eq 200) { break }
+        } catch {}
+        Start-Sleep -Seconds 2
+    }
     Start-Process $share
     [System.Windows.Forms.MessageBox]::Show(
         "Share this URL with your team (already copied to your clipboard):`r`n`r`n" +
