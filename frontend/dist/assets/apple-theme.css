@@ -1,0 +1,164 @@
+/* Apple Design & Modern Web Guidance Polish */
+
+/* 1. Global Typography & Optical Tuning */
+:root, .dark {
+  --apple-font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Geist", system-ui, -apple-system, sans-serif;
+  --apple-font-mono: "SF Mono", "Geist Mono", ui-monospace, Menlo, Monaco, Consolas, monospace;
+  --apple-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --apple-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --scrollbar-thumb: rgba(156, 163, 175, 0.25);
+  --scrollbar-thumb-hover: rgba(156, 163, 175, 0.45);
+  --scrollbar-track: transparent;
+}
+
+body {
+  font-family: var(--apple-font-sans) !important;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+code, kbd, samp, pre {
+  font-family: var(--apple-font-mono) !important;
+}
+
+h1, h2, h3, h4 {
+  letter-spacing: -0.022em;
+  font-weight: 600;
+}
+
+/* Tabular figures for data tables, metrics, dates, and badges */
+table, .tabular-nums, [data-tabular="true"], td, th {
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+/* 2. Apple Materials & Translucency (Frosted Glass Depth) */
+header, nav, .sticky.top-0 {
+  background: rgba(11, 17, 32, 0.78) !important;
+  backdrop-filter: blur(20px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+:root:not(.dark) header,
+:root:not(.dark) nav,
+:root:not(.dark) .sticky.top-0 {
+  background: rgba(255, 255, 255, 0.8) !important;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06) !important;
+}
+
+/* Cards & Surface hierarchy */
+.bg-card, [class*="rounded-"][class*="border"] {
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  box-shadow: 0 4px 16px -2px rgba(0, 0, 0, 0.18), 0 1px 2px 0 rgba(0, 0, 0, 0.08);
+}
+
+:root:not(.dark) .bg-card,
+:root:not(.dark) [class*="rounded-"][class*="border"] {
+  border-color: rgba(0, 0, 0, 0.08) !important;
+  box-shadow: 0 2px 12px -2px rgba(0, 0, 0, 0.06), 0 1px 2px 0 rgba(0, 0, 0, 0.04);
+}
+
+/* 3. Direct Manipulation & Button Response (Apple Spring Feel) */
+button, [role="button"], a[role="button"] {
+  transition: transform 120ms var(--apple-ease-out), background-color 150ms ease, border-color 150ms ease, box-shadow 150ms ease !important;
+  cursor: pointer;
+}
+
+button:active:not(:disabled),
+[role="button"]:active:not(:disabled) {
+  transform: scale(0.97) !important;
+}
+
+button:hover:not(:disabled):not(:active),
+[role="button"]:hover:not(:disabled):not(:active) {
+  transform: translateY(-0.5px);
+}
+
+/* 4. Refined Form Controls & Inputs */
+input, select, textarea {
+  transition: border-color 150ms ease, box-shadow 150ms ease, background-color 150ms ease !important;
+  border-radius: 8px !important;
+}
+
+input:focus, select:focus, textarea:focus,
+input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: none !important;
+  border-color: #14b8a6 !important;
+  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.28) !important;
+}
+
+::selection {
+  background: rgba(20, 184, 166, 0.35);
+  color: inherit;
+}
+
+/* 5. Modern Translucent Scrollbars (modern-web-guidance: customize-scrollbar-color-and-thickness) */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+@supports not (scrollbar-color: auto) {
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--scrollbar-track);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+    background-clip: padding-box;
+  }
+}
+
+/* 6. Modals & Dialog Overlays (Smooth Depth & Hierarchy) */
+div[role="dialog"], .modal-overlay {
+  backdrop-filter: blur(14px) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(14px) saturate(140%) !important;
+  background-color: rgba(7, 12, 22, 0.65) !important;
+}
+
+div[role="dialog"] > div {
+  border-radius: 16px !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  box-shadow: 0 24px 48px -12px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.05) !important;
+}
+
+/* 7. Table Polish & Row Hover */
+table tbody tr {
+  transition: background-color 100ms ease;
+}
+
+table tbody tr:hover td {
+  background-color: rgba(255, 255, 255, 0.035) !important;
+}
+
+:root:not(.dark) table tbody tr:hover td {
+  background-color: rgba(0, 0, 0, 0.025) !important;
+}
+
+/* 8. Accessibility: Reduced Motion & Reduced Transparency (apple-design §14) */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    transform: none !important;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  header, nav, .sticky.top-0, div[role="dialog"], .modal-overlay {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background-color: var(--background) !important;
+  }
+}
